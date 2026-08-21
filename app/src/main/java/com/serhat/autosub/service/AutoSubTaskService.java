@@ -1,6 +1,5 @@
 package com.serhat.autosub.service;
 
-
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
@@ -41,12 +40,20 @@ import com.serhat.autosub.shorts.ShortsTranscriptAnalyzer;
 import com.serhat.autosub.subtitles.SubtitleGenerator;
 import com.serhat.autosub.ui.main.MainActivity;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Scanner;
 import java.util.Set;
 
 public class AutoSubTaskService extends Service {
@@ -104,6 +111,8 @@ public class AutoSubTaskService extends Service {
     private ShortsLlmEngine activeShortsEngine;
     private boolean shortsAnalyzing;
     private boolean shortsExportCancelRequested;
+    private volatile boolean geminiCancelRequested = false;
+    
     private int gemmaDownloadProgress;
     private String gemmaDownloadSpeed = "";
     private String gemmaDownloadEta = "";
@@ -913,6 +922,7 @@ public class AutoSubTaskService extends Service {
     public void cancelCurrentQueueItem() {
         if (activeQueueItem != null) {
             queueCancelRequested = true;
+            geminiCancelRequested = true;
             subtitleGenerator.cancelGeneration();
             if (isRemovedActiveQueueItem(activeQueueItem)) {
                 finishRemovedActiveQueueItem(activeQueueItem);
@@ -963,6 +973,7 @@ public class AutoSubTaskService extends Service {
                 FFmpegKit.cancel();
                 break;
             case TRANSLATING:
+                geminiCancelRequested = true;
                 subtitleGenerator.cancelGeneration();
                 FFmpegKit.cancel();
                 break;
@@ -1121,6 +1132,13 @@ public class AutoSubTaskService extends Service {
             callback.onError("No subtitles available to translate");
             return;
         }
+
+        String engine = settingsPrefs.getString("translation_engine", "default");
+        if ("gemini".equals(engine)) {
+            translateQueueItemWithGemini(item, sourceLanguage, targetLanguage, callback);
+            return;
+        }
+
         item.setStatus(QueueItem.Status.TRANSLATING);
         item.setProgress(-1);
         item.setMessage("Translating subtitles...");
@@ -1179,6 +1197,196 @@ public class AutoSubTaskService extends Service {
                 });
             }
         });
+    }
+
+    private void translateQueueItemWithGemini(QueueItem item, String sourceLanguage, String targetLanguage, SubtitleGenerator.TranslationCallback callback) {
+        geminiCancelRequested = false;
+        item.setStatus(QueueItem.Status.TRANSLATING);
+        item.setProgress(-1);
+        item.setMessage("Translating with Gemini...");
+        item.setTranslationStatus("translating");
+        queueStore.updateItem(item);
+        publishQueueItems();
+        beginForeground(AutoSubTaskState.TaskType.SUBTITLE_SAVE,
+                "Translating Subtitles: " + item.getDisplayName(), "Preparing Gemini...", -1);
+
+        new Thread(() -> {
+            try {
+                String apiKey = settingsPrefs.getString("gemini_api_key", "");
+                if (apiKey.isEmpty()) {
+                    throw new Exception("Gemini API Key is missing. Please set it in Settings.");
+                }
+
+                // ממיר את השמות מההגדרות לשמות הרשמיים שקיימים בשרתים של גוגל
+                String modelRaw = settingsPrefs.getString("gemini_model", "flash lite 3.5");
+                String model;
+                switch (modelRaw) {
+                    case "gemini flash 3.7":
+                        model = "gemini-3.7-flash";
+                        break;
+                    case "flash 3.6":
+                        model = "gemini-3.6-flash";
+                        break;
+                    case "flash 3.5":
+                        model = "gemini-3.5-flash";
+                        break;
+                    case "flash lite 3.5":
+                        model = "gemini-3.5-flash-lite";
+                        break;
+                    case "flash lite 3.1":
+                        model = "gemini-3.1-flash-lite";
+                        break;
+                    default:
+                        model = "gemini-3.5-flash-lite";
+                        break;
+                }
+
+                int batchSize = settingsPrefs.getInt("gemini_batch_size", 150);
+                List<SubtitleGenerator.SubtitleEntry> entries = item.getSubtitles();
+                int totalBatches = (int) Math.ceil((double) entries.size() / batchSize);
+
+                for (int i = 0; i < totalBatches; i++) {
+                    if (geminiCancelRequested || queueCancelRequested) {
+                        throw new Exception("Translation cancelled");
+                    }
+
+                    int start = i * batchSize;
+                    int end = Math.min(start + batchSize, entries.size());
+                    List<SubtitleGenerator.SubtitleEntry> batch = entries.subList(start, end);
+
+                    JSONArray textArray = new JSONArray();
+                    for (SubtitleGenerator.SubtitleEntry entry : batch) {
+                        textArray.put(entry.getText());
+                    }
+
+                    String prompt = "You are a professional translator. Translate the following JSON array of subtitle texts from " +
+                            sourceLanguage + " to " + targetLanguage + ". Preserve the exact number of elements and the order. " +
+                            "Keep subtitle formatting if any. Return ONLY a valid JSON array of strings representing the translated texts. " +
+                            "Do not include any markdown formatting like ```json.\n\n" + textArray.toString();
+
+                    JSONObject part = new JSONObject();
+                    part.put("text", prompt);
+
+                    JSONArray parts = new JSONArray();
+                    parts.put(part);
+
+                    JSONObject content = new JSONObject();
+                    content.put("parts", parts);
+
+                    JSONArray contents = new JSONArray();
+                    contents.put(content);
+
+                    JSONObject payload = new JSONObject();
+                    payload.put("contents", contents);
+
+                    JSONObject genConfig = new JSONObject();
+                    genConfig.put("response_mime_type", "application/json");
+                    payload.put("generationConfig", genConfig);
+
+                    try {
+                        URL url = new URL("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + apiKey);
+                        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                        conn.setRequestMethod("POST");
+                        conn.setRequestProperty("Content-Type", "application/json");
+                        conn.setDoOutput(true);
+
+                        try (OutputStream os = conn.getOutputStream()) {
+                            byte[] input = payload.toString().getBytes("utf-8");
+                            os.write(input, 0, input.length);
+                        }
+
+                        int code = conn.getResponseCode();
+                        if (code != 200) {
+                            throw new Exception("Gemini API Error (" + code + ")");
+                        }
+
+                        InputStream is = conn.getInputStream();
+                        Scanner s = new Scanner(is).useDelimiter("\\A");
+                        String response = s.hasNext() ? s.next() : "";
+
+                        JSONObject jsonResponse = new JSONObject(response);
+                        JSONArray candidates = jsonResponse.optJSONArray("candidates");
+                        if (candidates == null || candidates.length() == 0) {
+                            throw new Exception("No translation returned by Gemini.");
+                        }
+
+                        String translatedTextRaw = candidates.getJSONObject(0)
+                                .getJSONObject("content")
+                                .getJSONArray("parts")
+                                .getJSONObject(0)
+                                .getString("text");
+
+                        if (translatedTextRaw.startsWith("```json")) {
+                            translatedTextRaw = translatedTextRaw.substring(7);
+                        } else if (translatedTextRaw.startsWith("```")) {
+                            translatedTextRaw = translatedTextRaw.substring(3);
+                        }
+                        if (translatedTextRaw.endsWith("```")) {
+                            translatedTextRaw = translatedTextRaw.substring(0, translatedTextRaw.length() - 3);
+                        }
+                        translatedTextRaw = translatedTextRaw.trim();
+
+                        JSONArray translatedArray = new JSONArray(translatedTextRaw);
+                        if (translatedArray.length() != batch.size()) {
+                            throw new Exception("Gemini returned " + translatedArray.length() + " items, expected " + batch.size());
+                        }
+
+                        for (int j = 0; j < batch.size(); j++) {
+                            batch.get(j).setTranslationText(translatedArray.getString(j));
+                        }
+                        
+                    } catch (Exception batchEx) {
+                        DebugLog.e("AutoSubTaskService", "Gemini translation batch failed. Falling back to original text.", batchEx);
+                        // מנגנון ה-Fallback שביקשת!
+                        // אם תרגום המקבץ נכשל מסיבה כלשהי, הטקסט המקורי יועתק אל שורת התרגום.
+                        // התזמונים לא נפגעים בכלל והתהליך ימשיך.
+                        for (int j = 0; j < batch.size(); j++) {
+                            batch.get(j).setTranslationText(batch.get(j).getText());
+                        }
+                    }
+
+                    int progress = (int) (((double) end / entries.size()) * 100);
+                    handler.post(() -> {
+                        item.setProgress(progress);
+                        item.setMessage("Translating with Gemini... " + progress + "%");
+                        queueStore.updateItem(item);
+                        publishQueueItems();
+                        publishState(new AutoSubTaskState(AutoSubTaskState.TaskType.SUBTITLE_SAVE,
+                                "Translating Subtitles: " + item.getDisplayName(), item.getMessage(),
+                                progress, item.getId(), activeDownloadModelId, activeDownloadSpeedText,
+                                activeDownloadEtaText, activeDownloadPaused, queueRunning, queuedDownloadIds()));
+                        callback.onProgressUpdate(progress);
+                    });
+                }
+
+                handler.post(() -> {
+                    item.setTranslationSourceLanguage(sourceLanguage);
+                    item.setTranslationTargetLanguage(targetLanguage);
+                    item.setTranslationStatus("translated");
+                    item.setPreviewText(getPreviewTextHelper(entries));
+                    item.setStatus(QueueItem.Status.COMPLETED);
+                    item.setProgress(100);
+                    item.setMessage("Translated subtitles with Gemini");
+                    queueStore.updateItem(item);
+                    publishQueueItems();
+                    publishIdleStateIfNoWork();
+                    callback.onTranslated(entries, sourceLanguage, targetLanguage);
+                });
+
+            } catch (Exception e) {
+                String errMsg = e.getMessage();
+                handler.post(() -> {
+                    item.setStatus(QueueItem.Status.COMPLETED);
+                    item.setProgress(100);
+                    item.setTranslationStatus("failed");
+                    item.setMessage("Translation failed: " + errMsg);
+                    queueStore.updateItem(item);
+                    publishQueueItems();
+                    publishIdleStateIfNoWork();
+                    callback.onError(errMsg);
+                });
+            }
+        }).start();
     }
 
     public void batchSaveSubtitles(List<QueueItem> items, String format, File outputDir, VoskModelInfo modelInfo,
