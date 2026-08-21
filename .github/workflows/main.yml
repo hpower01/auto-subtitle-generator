@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Android Release (ARM64 Only)
 
 on:
   workflow_dispatch: # מופעל אך ורק ידנית בלחיצת כפתור
@@ -8,13 +8,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. משיכת הקוד מהריפו
+      # 1. משיכת הקוד מהריפו (כולל ספריות C++)
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      # 2. התקנת סביבת Java
+      # 2. התקנת סביבת Java 17
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -26,13 +26,26 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # 4. קימפול ובניית קובץ ה-APK
-      - name: Build with Gradle
-        run: ./gradlew assembleDebug --stacktrace
+      # 4. קימפול גרסת Release מכווצת עבור מעבדי arm64-v8a בלבד
+      - name: Build Release APK (ARM64 only)
+        run: ./gradlew assembleRelease -Pandroid.injected.build.abi=arm64-v8a --stacktrace
 
-      # 5. העלאת קובץ ה-APK המוכן
-      - name: Upload Debug APK
+      # 5. חתימה על ה-APK כדי שניתן יהיה להתקין אותו ישירות במכשיר
+      - name: Sign Release APK
+        run: |
+          # יצירת מפתח חתימה זמני
+          keytool -genkeypair -v -keystore release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias my-key -storepass 123456 -keypass 123456 -dname "CN=AutoSub, OU=App, O=AutoSub, C=IL"
+          
+          # מציאת ה-APK שנוצר
+          UNSIGNED_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+          
+          # חתימה באמצעות apksigner המובנה של אנדרואיד
+          BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -n 1)
+          $BUILD_TOOLS/apksigner sign --ks release.jks --ks-pass pass:123456 --key-pass pass:123456 --ks-key-alias my-key --out app/build/outputs/apk/release/AutoSub-arm64-release.apk "$UNSIGNED_APK"
+
+      # 6. העלאת קובץ ה-APK המכווץ והחתום להורדה
+      - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: AutoSub-APK
-          path: app/build/outputs/apk/debug/*.apk
+          name: AutoSub-ARM64-Release-APK
+          path: app/build/outputs/apk/release/AutoSub-arm64-release.apk
