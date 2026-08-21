@@ -77,7 +77,8 @@ public class SettingsFragment extends Fragment {
             "Persian",
             "Greek",
             "Swedish",
-            "Czech"
+            "Czech",
+            "Hebrew"
     };
 
     private static final String[] WHISPER_LANGUAGE_CODES = {
@@ -102,7 +103,8 @@ public class SettingsFragment extends Fragment {
             "fa",
             "el",
             "sv",
-            "cs"
+            "cs",
+            "he"
     };
 
     private static final String[] TRANSLATION_SOURCE_LANGUAGE_LABELS = {
@@ -127,7 +129,8 @@ public class SettingsFragment extends Fragment {
             "Persian",
             "Greek",
             "Swedish",
-            "Czech"
+            "Czech",
+            "Hebrew"
     };
 
     private static final String[] TRANSLATION_SOURCE_LANGUAGE_CODES = {
@@ -152,7 +155,8 @@ public class SettingsFragment extends Fragment {
             "fa",
             "el",
             "sv",
-            "cs"
+            "cs",
+            "he"
     };
 
     private static final String[] TRANSLATION_TARGET_LANGUAGE_LABELS = {
@@ -176,7 +180,8 @@ public class SettingsFragment extends Fragment {
             "Persian",
             "Greek",
             "Swedish",
-            "Czech"
+            "Czech",
+            "Hebrew"
     };
 
     private static final String[] TRANSLATION_TARGET_LANGUAGE_CODES = {
@@ -200,7 +205,8 @@ public class SettingsFragment extends Fragment {
             "fa",
             "el",
             "sv",
-            "cs"
+            "cs",
+            "he"
     };
 
     @Nullable
