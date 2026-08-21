@@ -1,6 +1,8 @@
 package com.serhat.autosub.ui.settings;
 
 import android.os.Bundle;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -32,6 +34,11 @@ public class SettingsFragment extends Fragment {
     private boolean syncingWhisperVadAggressiveness;
     private boolean syncingTranslationSourceLanguage;
     private boolean syncingTranslationTargetLanguage;
+    
+    // New Syncing Variables for Gemini
+    private boolean syncingTranslationEngine;
+    private boolean syncingGeminiApiKey;
+    private boolean syncingGeminiModel;
 
     private static final String[] WHISPER_VAD_MODEL_LABELS = {
             "WebRTC",
@@ -209,6 +216,34 @@ public class SettingsFragment extends Fragment {
             "he"
     };
 
+    // Engine options
+    private static final String[] TRANSLATION_ENGINE_LABELS = {
+            "Default Engine",
+            "Gemini AI"
+    };
+
+    private static final String[] TRANSLATION_ENGINE_VALUES = {
+            "default",
+            "gemini"
+    };
+
+    // Gemini Models Options
+    private static final String[] GEMINI_MODEL_LABELS = {
+            "gemini flash 3.7",
+            "flash 3.6",
+            "flash 3.5",
+            "flash lite 3.5",
+            "flash lite 3.1"
+    };
+
+    private static final String[] GEMINI_MODEL_VALUES = {
+            "gemini flash 3.7",
+            "flash 3.6",
+            "flash 3.5",
+            "flash lite 3.5",
+            "flash lite 3.1"
+    };
+
     @Nullable
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
@@ -285,6 +320,72 @@ public class SettingsFragment extends Fragment {
             @Override
             public void onNothingSelected(AdapterView<?> parent) {
             }
+        });
+        
+        // Translation Engine Adapter
+        ArrayAdapter<String> translationEngineAdapter = new ArrayAdapter<>(
+                requireContext(),
+                android.R.layout.simple_spinner_item,
+                TRANSLATION_ENGINE_LABELS);
+        translationEngineAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        binding.translationEngineSpinner.setAdapter(translationEngineAdapter);
+        binding.translationEngineSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                if (!syncingTranslationEngine && position >= 0 && position < TRANSLATION_ENGINE_VALUES.length) {
+                    String engine = TRANSLATION_ENGINE_VALUES[position];
+                    viewModel.setTranslationEngine(engine);
+                    binding.geminiSettingsContainer.setVisibility(
+                            "gemini".equals(engine) ? View.VISIBLE : View.GONE);
+                }
+            }
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {}
+        });
+
+        // Gemini API Key TextWatcher
+        binding.geminiApiKeyEditText.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                if (!syncingGeminiApiKey) {
+                    viewModel.setGeminiApiKey(s.toString());
+                }
+            }
+        });
+
+        // Clear Gemini API Key
+        binding.geminiApiKeyClearButton.setOnClickListener(v -> {
+            binding.geminiApiKeyEditText.setText("");
+            viewModel.setGeminiApiKey("");
+        });
+
+        // Gemini Model Adapter
+        ArrayAdapter<String> geminiModelAdapter = new ArrayAdapter<>(
+                requireContext(),
+                android.R.layout.simple_spinner_item,
+                GEMINI_MODEL_LABELS);
+        geminiModelAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        binding.geminiModelSpinner.setAdapter(geminiModelAdapter);
+        binding.geminiModelSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                if (!syncingGeminiModel && position >= 0 && position < GEMINI_MODEL_VALUES.length) {
+                    viewModel.setGeminiModel(GEMINI_MODEL_VALUES[position]);
+                }
+            }
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {}
+        });
+
+        // Gemini Batch Size Slider
+        binding.geminiBatchSizeSlider.addOnChangeListener((slider, value, fromUser) -> {
+            viewModel.setGeminiBatchSize(Math.round(value));
         });
 
         binding.batchFormatToggle.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
@@ -534,6 +635,36 @@ public class SettingsFragment extends Fragment {
                     language, TRANSLATION_TARGET_LANGUAGE_CODES, 0));
             syncingTranslationTargetLanguage = false;
         });
+
+        // Observers for Gemini Settings
+        viewModel.getTranslationEngine().observe(getViewLifecycleOwner(), engine -> {
+            syncingTranslationEngine = true;
+            binding.translationEngineSpinner.setSelection(indexOfEngine(engine));
+            binding.geminiSettingsContainer.setVisibility(
+                    "gemini".equals(engine) ? View.VISIBLE : View.GONE);
+            syncingTranslationEngine = false;
+        });
+
+        viewModel.getGeminiApiKey().observe(getViewLifecycleOwner(), key -> {
+            if (key != null && !key.equals(binding.geminiApiKeyEditText.getText().toString())) {
+                syncingGeminiApiKey = true;
+                binding.geminiApiKeyEditText.setText(key);
+                syncingGeminiApiKey = false;
+            }
+        });
+
+        viewModel.getGeminiModel().observe(getViewLifecycleOwner(), model -> {
+            syncingGeminiModel = true;
+            binding.geminiModelSpinner.setSelection(indexOfGeminiModel(model));
+            syncingGeminiModel = false;
+        });
+
+        viewModel.getGeminiBatchSize().observe(getViewLifecycleOwner(), batchSize -> {
+            if (batchSize != null) {
+                binding.geminiBatchSizeSlider.setValue(batchSize);
+                binding.geminiBatchSizeValueTV.setText(batchSize + " subtitles");
+            }
+        });
     }
 
     private int indexOfWhisperLanguage(String language) {
@@ -590,6 +721,27 @@ public class SettingsFragment extends Fragment {
         return fallbackIndex;
     }
 
+    private int indexOfEngine(String engine) {
+        String normalizedEngine = engine == null ? "default" : engine;
+        for (int i = 0; i < TRANSLATION_ENGINE_VALUES.length; i++) {
+            if (TRANSLATION_ENGINE_VALUES[i].equalsIgnoreCase(normalizedEngine)) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    private int indexOfGeminiModel(String model) {
+        String normalizedModel = model == null ? "flash lite 3.5" : model;
+        for (int i = 0; i < GEMINI_MODEL_VALUES.length; i++) {
+            if (GEMINI_MODEL_VALUES[i].equalsIgnoreCase(normalizedModel)) {
+                return i;
+            }
+        }
+        // Default returns index 3, which is "flash lite 3.5"
+        return 3;
+    }
+
     private void setTranslationControlsEnabled(boolean enabled) {
         binding.translationSourceLanguageSpinner.setEnabled(enabled);
         binding.translationTargetLanguageSpinner.setEnabled(enabled);
@@ -597,6 +749,21 @@ public class SettingsFragment extends Fragment {
         binding.translationTargetLabelTV.setEnabled(enabled);
         binding.translationSourceLabelTV.setAlpha(enabled ? 0.75f : 0.38f);
         binding.translationTargetLabelTV.setAlpha(enabled ? 0.75f : 0.38f);
+
+        // Adjust new Gemini Translation controls based on master switch
+        if (binding.translationEngineSpinner != null) {
+            binding.translationEngineSpinner.setEnabled(enabled);
+            binding.translationEngineLabelTV.setEnabled(enabled);
+            binding.translationEngineLabelTV.setAlpha(enabled ? 0.75f : 0.38f);
+            
+            binding.geminiApiKeyEditText.setEnabled(enabled);
+            binding.geminiApiKeyClearButton.setEnabled(enabled);
+            binding.geminiModelSpinner.setEnabled(enabled);
+            binding.geminiBatchSizeSlider.setEnabled(enabled);
+            
+            // Adjust visual state of the container elements
+            binding.geminiSettingsContainer.setAlpha(enabled ? 1.0f : 0.38f);
+        }
     }
 
     @Override
