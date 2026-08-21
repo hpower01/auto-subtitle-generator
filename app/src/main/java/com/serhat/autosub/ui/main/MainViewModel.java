@@ -1,6 +1,5 @@
 package com.serhat.autosub.ui.main;
 
-
 import android.app.Application;
 import android.content.ComponentName;
 import android.content.Context;
@@ -92,6 +91,13 @@ public class MainViewModel extends AndroidViewModel {
     private static final String KEY_SHOW_COMPLETION_NOTIFICATIONS = "show_completion_notifications";
     private static final String KEY_SHOW_RAM_USAGE = "show_ram_usage";
     private static final String KEY_SHORTS_SMOOTH_AUTO_FRAMING = "shorts_smooth_auto_framing";
+    
+    // --- Gemini Settings Constants ---
+    private static final String KEY_TRANSLATION_ENGINE = "translation_engine";
+    private static final String KEY_GEMINI_API_KEY = "gemini_api_key";
+    private static final String KEY_GEMINI_MODEL = "gemini_model";
+    private static final String KEY_GEMINI_BATCH_SIZE = "gemini_batch_size";
+
     private final android.content.SharedPreferences settingsPrefs;
 
     // --- State LiveData ---
@@ -150,6 +156,12 @@ public class MainViewModel extends AndroidViewModel {
     private final MutableLiveData<Boolean> showCompletionNotifications = new MutableLiveData<>(true);
     private final MutableLiveData<Boolean> showRamUsage = new MutableLiveData<>(true);
     private final MutableLiveData<Boolean> shortsSmoothAutoFraming = new MutableLiveData<>(false);
+
+    // --- Gemini Variables ---
+    private final MutableLiveData<String> translationEngine = new MutableLiveData<>("default");
+    private final MutableLiveData<String> geminiApiKey = new MutableLiveData<>("");
+    private final MutableLiveData<String> geminiModel = new MutableLiveData<>("flash lite 3.5");
+    private final MutableLiveData<Integer> geminiBatchSize = new MutableLiveData<>(150);
 
     // Navigation and screen command trigger
     private final MutableLiveData<Integer> activeNavigationTab = new MutableLiveData<>(R.id.nav_generate);
@@ -446,6 +458,12 @@ public class MainViewModel extends AndroidViewModel {
     public LiveData<Boolean> getShowCompletionNotifications() { return showCompletionNotifications; }
     public LiveData<Boolean> getShowRamUsage() { return showRamUsage; }
     public LiveData<Boolean> getShortsSmoothAutoFraming() { return shortsSmoothAutoFraming; }
+    
+    // --- Gemini Data Getters ---
+    public LiveData<String> getTranslationEngine() { return translationEngine; }
+    public LiveData<String> getGeminiApiKey() { return geminiApiKey; }
+    public LiveData<String> getGeminiModel() { return geminiModel; }
+    public LiveData<Integer> getGeminiBatchSize() { return geminiBatchSize; }
 
     public LiveData<Integer> getActiveNavigationTab() { return activeNavigationTab; }
     public LiveData<Boolean> getNavigateToPreviewTrigger() { return navigateToPreviewTrigger; }
@@ -504,6 +522,12 @@ public class MainViewModel extends AndroidViewModel {
         showCompletionNotifications.setValue(settingsPrefs.getBoolean(KEY_SHOW_COMPLETION_NOTIFICATIONS, true));
         showRamUsage.setValue(settingsPrefs.getBoolean(KEY_SHOW_RAM_USAGE, true));
         shortsSmoothAutoFraming.setValue(settingsPrefs.getBoolean(KEY_SHORTS_SMOOTH_AUTO_FRAMING, false));
+        
+        // Load Gemini specific settings
+        translationEngine.setValue(settingsPrefs.getString(KEY_TRANSLATION_ENGINE, "default"));
+        geminiApiKey.setValue(settingsPrefs.getString(KEY_GEMINI_API_KEY, ""));
+        geminiModel.setValue(settingsPrefs.getString(KEY_GEMINI_MODEL, "flash lite 3.5"));
+        geminiBatchSize.setValue(settingsPrefs.getInt(KEY_GEMINI_BATCH_SIZE, 150));
     }
 
     public void setActiveNavigationTab(int id) {
@@ -751,6 +775,27 @@ public class MainViewModel extends AndroidViewModel {
                 getLiveDataValue(translationSourceLanguage, "auto"),
                 normalizedLanguage);
         settingsPrefs.edit().putString(KEY_TRANSLATION_TARGET_LANGUAGE, normalizedLanguage).apply();
+    }
+
+    // --- Gemini Settings Setters ---
+    public void setTranslationEngine(String engine) {
+        translationEngine.setValue(engine);
+        settingsPrefs.edit().putString(KEY_TRANSLATION_ENGINE, engine).apply();
+    }
+
+    public void setGeminiApiKey(String key) {
+        geminiApiKey.setValue(key);
+        settingsPrefs.edit().putString(KEY_GEMINI_API_KEY, key).apply();
+    }
+
+    public void setGeminiModel(String model) {
+        geminiModel.setValue(model);
+        settingsPrefs.edit().putString(KEY_GEMINI_MODEL, model).apply();
+    }
+
+    public void setGeminiBatchSize(int size) {
+        geminiBatchSize.setValue(size);
+        settingsPrefs.edit().putInt(KEY_GEMINI_BATCH_SIZE, size).apply();
     }
 
     private String normalizeTranslationLanguage(String language, String fallback) {
