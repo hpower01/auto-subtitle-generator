@@ -205,6 +205,112 @@
                 android:layout_width="match_parent"
                 android:layout_height="48dp"
                 android:layout_marginTop="4dp" />
+
+            <!-- New Translation Engine Section -->
+            <TextView
+                android:id="@+id/translationEngineLabelTV"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:alpha="0.75"
+                android:text="Translation Engine"
+                android:textSize="13sp" />
+
+            <Spinner
+                android:id="@+id/translationEngineSpinner"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginTop="4dp" />
+
+            <!-- Gemini Settings Container -->
+            <LinearLayout
+                android:id="@+id/geminiSettingsContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:alpha="0.75"
+                    android:text="Gemini API Key"
+                    android:textSize="13sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginTop="4dp"
+                    android:gravity="center_vertical">
+
+                    <EditText
+                        android:id="@+id/geminiApiKeyEditText"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="48dp"
+                        android:hint="Enter API Key"
+                        android:inputType="textVisiblePassword"
+                        android:maxLines="1"
+                        android:backgroundTint="?attr/colorPrimary" />
+
+                    <ImageButton
+                        android:id="@+id/geminiApiKeyClearButton"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:src="@android:drawable/ic_menu_close_clear_cancel"
+                        android:contentDescription="Clear API Key" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:alpha="0.75"
+                    android:text="Gemini Model"
+                    android:textSize="13sp" />
+
+                <Spinner
+                    android:id="@+id/geminiModelSpinner"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="4dp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:alpha="0.75"
+                        android:text="Subtitles per request (Batch size)"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/geminiBatchSizeValueTV"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="150 subtitles"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <com.google.android.material.slider.Slider
+                    android:id="@+id/geminiBatchSizeSlider"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:value="150"
+                    android:valueFrom="50"
+                    android:valueTo="300"
+                    android:stepSize="1" />
+            </LinearLayout>
+
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
