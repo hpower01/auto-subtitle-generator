@@ -1,14 +1,14 @@
 name: Build Android Release (ARM64 Only)
 
 on:
-  workflow_dispatch: # מופעל אך ורק ידנית בלחיצת כפתור
+  workflow_dispatch: # מופעל ידנית בלחיצת כפתור
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. משיכת הקוד מהריפו (כולל ספריות C++)
+      # 1. משיכת הקוד מהריפו
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -26,26 +26,36 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # 4. קימפול גרסת Release מכווצת עבור מעבדי arm64-v8a בלבד
+      # 4. קימפול גרסת Release עבור מעבדי 64-ביט בלבד
       - name: Build Release APK (ARM64 only)
         run: ./gradlew assembleRelease -Pandroid.injected.build.abi=arm64-v8a --stacktrace
 
-      # 5. חתימה על ה-APK כדי שניתן יהיה להתקין אותו ישירות במכשיר
+      # 5. מציאת ה-APK וחתימה עליו
       - name: Sign Release APK
         run: |
-          # יצירת מפתח חתימה זמני
+          # חיפוש דינמי של כל קובץ APK שנוצר בפרויקט
+          UNSIGNED_APK=$(find . -name "*.apk" | head -n 1)
+          
+          if [ -z "$UNSIGNED_APK" ]; then
+            echo "Error: No APK file was generated!"
+            exit 1
+          fi
+          
+          echo "Found APK at: $UNSIGNED_APK"
+          
+          # יצירת תיקיית פלט נקייה
+          mkdir -p dist
+          
+          # יצירת מפתח חתימה
           keytool -genkeypair -v -keystore release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias my-key -storepass 123456 -keypass 123456 -dname "CN=AutoSub, OU=App, O=AutoSub, C=IL"
           
-          # מציאת ה-APK שנוצר
-          UNSIGNED_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
-          
-          # חתימה באמצעות apksigner המובנה של אנדרואיד
+          # מציאת כלי החתימה apksigner וחתימה על הקובץ
           BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -n 1)
-          $BUILD_TOOLS/apksigner sign --ks release.jks --ks-pass pass:123456 --key-pass pass:123456 --ks-key-alias my-key --out app/build/outputs/apk/release/AutoSub-arm64-release.apk "$UNSIGNED_APK"
+          $BUILD_TOOLS/apksigner sign --ks release.jks --ks-pass pass:123456 --key-pass pass:123456 --ks-key-alias my-key --out dist/AutoSub-arm64-release.apk "$UNSIGNED_APK"
 
-      # 6. העלאת קובץ ה-APK המכווץ והחתום להורדה
+      # 6. העלאת קובץ ה-APK החתום והמוכן
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
           name: AutoSub-ARM64-Release-APK
-          path: app/build/outputs/apk/release/AutoSub-arm64-release.apk
+          path: dist/AutoSub-arm64-release.apk
