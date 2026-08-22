@@ -160,7 +160,7 @@ public class MainViewModel extends AndroidViewModel {
     // --- Gemini Variables ---
     private final MutableLiveData<String> translationEngine = new MutableLiveData<>("default");
     private final MutableLiveData<String> geminiApiKey = new MutableLiveData<>("");
-    private final MutableLiveData<String> geminiModel = new MutableLiveData<>("flash lite 3.5");
+    private final MutableLiveData<String> geminiModel = new MutableLiveData<>("gemini-3.5-flash-lite");
     private final MutableLiveData<Integer> geminiBatchSize = new MutableLiveData<>(150);
 
     // Navigation and screen command trigger
@@ -526,7 +526,7 @@ public class MainViewModel extends AndroidViewModel {
         // Load Gemini specific settings
         translationEngine.setValue(settingsPrefs.getString(KEY_TRANSLATION_ENGINE, "default"));
         geminiApiKey.setValue(settingsPrefs.getString(KEY_GEMINI_API_KEY, ""));
-        geminiModel.setValue(settingsPrefs.getString(KEY_GEMINI_MODEL, "flash lite 3.5"));
+        geminiModel.setValue(settingsPrefs.getString(KEY_GEMINI_MODEL, "gemini-3.5-flash-lite"));
         geminiBatchSize.setValue(settingsPrefs.getInt(KEY_GEMINI_BATCH_SIZE, 150));
     }
 
