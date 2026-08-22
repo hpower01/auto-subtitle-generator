@@ -23,41 +23,58 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # 1. קימפול גרסת Release עבור מעבדי 64-ביט
-      - name: Build Release APK (ARM64 only)
-        run: ./gradlew assembleRelease -Pandroid.injected.build.abi=arm64-v8a --stacktrace
+      # קימפול גרסת Release
+      - name: Build Release APK
+        run: ./gradlew assembleRelease --stacktrace
 
-      # 2. יישור (Zipalign) וחתימה מלאה
+      # יישור (Zipalign) וחתימה
       - name: Zipalign and Sign APK
         run: |
-          # מציאת ה-APK שנוצר
-          UNSIGNED_APK=$(find . -name "*.apk" | head -n 1)
-          
-          if [ -z "$UNSIGNED_APK" ]; then
-            echo "Error: No APK file found!"
-            exit 1
-          fi
-          
           mkdir -p dist
           BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -n 1)
           
-          # שלב א': יישור הקובץ (Zipalign)
+          # 1. איתור ה-APK המדויק מתיקיית ה-Release
+          UNSIGNED_APK=$(find app/build/outputs/apk/release/ -type f -name "*.apk" | head -n 1)
+          
+          if [ -z "$UNSIGNED_APK" ]; then
+            # במקרה שהמודול לא נקרא 'app'
+            UNSIGNED_APK=$(find . -path "*/build/outputs/apk/release/*.apk" | head -n 1)
+          fi
+          
+          echo "Found APK: $UNSIGNED_APK"
+          
+          # 2. יישור (Zipalign)
           echo "Running zipalign..."
-          $BUILD_TOOLS/zipalign -v -p 4 "$UNSIGNED_APK" dist/aligned.apk
+          $BUILD_TOOLS/zipalign -f -v -p 4 "$UNSIGNED_APK" dist/aligned.apk
           
-          # שלב ב': יצירת מפתח חתימה
-          keytool -genkeypair -v -keystore release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias my-key -storepass 123456 -keypass 123456 -dname "CN=AutoSub, OU=App, O=AutoSub, C=IL"
+          # 3. יצירת מפתח יציב עם פרמטרים תואמים
+          keytool -genkeypair -v \
+            -keystore release.jks \
+            -alias my-key-alias \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass "12345678" \
+            -keypass "12345678" \
+            -dname "CN=AutoSub, OU=App, O=AutoSub, C=IL"
           
-          # שלב ג': חתימה באמצעות apksigner עם תמיכה בכל סוגי החתימות (V1, V2, V3)
-          echo "Signing with apksigner..."
-          $BUILD_TOOLS/apksigner sign --ks release.jks --ks-pass pass:123456 --key-pass pass:123456 --ks-key-alias my-key --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true --out dist/AutoSub-arm64-release.apk dist/aligned.apk
+          # 4. חתימה עם apksigner
+          echo "Signing APK..."
+          $BUILD_TOOLS/apksigner sign \
+            --ks release.jks \
+            --ks-key-alias my-key-alias \
+            --ks-pass pass:12345678 \
+            --key-pass pass:12345678 \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --out dist/AutoSub-release.apk dist/aligned.apk
           
-          # שלב ד': אימות החתימה
-          $BUILD_TOOLS/apksigner verify --verbose dist/AutoSub-arm64-release.apk
+          # 5. אימות החתימה
+          $BUILD_TOOLS/apksigner verify --verbose dist/AutoSub-release.apk
 
-      # 3. העלאת הקובץ המוכן
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: AutoSub-ARM64-Release-APK
-          path: dist/AutoSub-arm64-release.apk
+          name: AutoSub-Release-APK
+          path: dist/AutoSub-release.apk
