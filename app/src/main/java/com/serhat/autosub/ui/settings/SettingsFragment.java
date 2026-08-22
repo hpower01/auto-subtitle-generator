@@ -35,7 +35,7 @@ public class SettingsFragment extends Fragment {
     private boolean syncingTranslationSourceLanguage;
     private boolean syncingTranslationTargetLanguage;
     
-    // New Syncing Variables for Gemini
+    // Syncing Variables for Gemini
     private boolean syncingTranslationEngine;
     private boolean syncingGeminiApiKey;
     private boolean syncingGeminiModel;
@@ -227,21 +227,21 @@ public class SettingsFragment extends Fragment {
             "gemini"
     };
 
-    // Gemini Models Options
+    // Exact Gemini Models Options
     private static final String[] GEMINI_MODEL_LABELS = {
-            "gemini flash 3.7",
-            "flash 3.6",
-            "flash 3.5",
-            "flash lite 3.5",
-            "flash lite 3.1"
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite"
     };
 
     private static final String[] GEMINI_MODEL_VALUES = {
-            "gemini flash 3.7",
-            "flash 3.6",
-            "flash 3.5",
-            "flash lite 3.5",
-            "flash lite 3.1"
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite"
     };
 
     @Nullable
@@ -732,13 +732,13 @@ public class SettingsFragment extends Fragment {
     }
 
     private int indexOfGeminiModel(String model) {
-        String normalizedModel = model == null ? "flash lite 3.5" : model;
+        String normalizedModel = model == null ? "gemini-3.5-flash-lite" : model;
         for (int i = 0; i < GEMINI_MODEL_VALUES.length; i++) {
             if (GEMINI_MODEL_VALUES[i].equalsIgnoreCase(normalizedModel)) {
                 return i;
             }
         }
-        // Default returns index 3, which is "flash lite 3.5"
+        // Default returns index 3, which is "gemini-3.5-flash-lite"
         return 3;
     }
 
