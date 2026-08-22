@@ -1217,30 +1217,7 @@ public class AutoSubTaskService extends Service {
                     throw new Exception("Gemini API Key is missing. Please set it in Settings.");
                 }
 
-                // ממיר את השמות מההגדרות לשמות הרשמיים שקיימים בשרתים של גוגל
-                String modelRaw = settingsPrefs.getString("gemini_model", "flash lite 3.5");
-                String model;
-                switch (modelRaw) {
-                    case "gemini flash 3.7":
-                        model = "gemini-3.7-flash";
-                        break;
-                    case "flash 3.6":
-                        model = "gemini-3.6-flash";
-                        break;
-                    case "flash 3.5":
-                        model = "gemini-3.5-flash";
-                        break;
-                    case "flash lite 3.5":
-                        model = "gemini-3.5-flash-lite";
-                        break;
-                    case "flash lite 3.1":
-                        model = "gemini-3.1-flash-lite";
-                        break;
-                    default:
-                        model = "gemini-3.5-flash-lite";
-                        break;
-                }
-
+                String model = settingsPrefs.getString("gemini_model", "gemini-3.5-flash-lite");
                 int batchSize = settingsPrefs.getInt("gemini_batch_size", 150);
                 List<SubtitleGenerator.SubtitleEntry> entries = item.getSubtitles();
                 int totalBatches = (int) Math.ceil((double) entries.size() / batchSize);
@@ -1253,6 +1230,21 @@ public class AutoSubTaskService extends Service {
                     int start = i * batchSize;
                     int end = Math.min(start + batchSize, entries.size());
                     List<SubtitleGenerator.SubtitleEntry> batch = entries.subList(start, end);
+
+                    // עדכון התקדמות לפני תחילת הבקשה עבור ה-Batch הנוכחי
+                    int currentProgress = (int) (((double) start / entries.size()) * 100);
+                    String preProgressMessage = "Gemini: Translating lines " + (start + 1) + " to " + end + "...";
+                    handler.post(() -> {
+                        item.setProgress(currentProgress);
+                        item.setMessage(preProgressMessage);
+                        queueStore.updateItem(item);
+                        publishQueueItems();
+                        publishState(new AutoSubTaskState(AutoSubTaskState.TaskType.SUBTITLE_SAVE,
+                                "Translating Subtitles: " + item.getDisplayName(), preProgressMessage,
+                                currentProgress, item.getId(), activeDownloadModelId, activeDownloadSpeedText,
+                                activeDownloadEtaText, activeDownloadPaused, queueRunning, queuedDownloadIds()));
+                        callback.onProgressUpdate(currentProgress);
+                    });
 
                     JSONArray textArray = new JSONArray();
                     for (SubtitleGenerator.SubtitleEntry entry : batch) {
@@ -1337,25 +1329,25 @@ public class AutoSubTaskService extends Service {
                         
                     } catch (Exception batchEx) {
                         DebugLog.e("AutoSubTaskService", "Gemini translation batch failed. Falling back to original text.", batchEx);
-                        // מנגנון ה-Fallback שביקשת!
-                        // אם תרגום המקבץ נכשל מסיבה כלשהי, הטקסט המקורי יועתק אל שורת התרגום.
-                        // התזמונים לא נפגעים בכלל והתהליך ימשיך.
+                        // מנגנון ה-Fallback במקרה של כשלון עבור מקבץ ספציפי
                         for (int j = 0; j < batch.size(); j++) {
                             batch.get(j).setTranslationText(batch.get(j).getText());
                         }
                     }
 
-                    int progress = (int) (((double) end / entries.size()) * 100);
+                    // עדכון התקדמות לאחר סיום ה-Batch
+                    int completedProgress = (int) (((double) end / entries.size()) * 100);
+                    String postProgressMessage = "Gemini: Translated " + end + "/" + entries.size() + " lines (" + completedProgress + "%)";
                     handler.post(() -> {
-                        item.setProgress(progress);
-                        item.setMessage("Translating with Gemini... " + progress + "%");
+                        item.setProgress(completedProgress);
+                        item.setMessage(postProgressMessage);
                         queueStore.updateItem(item);
                         publishQueueItems();
                         publishState(new AutoSubTaskState(AutoSubTaskState.TaskType.SUBTITLE_SAVE,
-                                "Translating Subtitles: " + item.getDisplayName(), item.getMessage(),
-                                progress, item.getId(), activeDownloadModelId, activeDownloadSpeedText,
+                                "Translating Subtitles: " + item.getDisplayName(), postProgressMessage,
+                                completedProgress, item.getId(), activeDownloadModelId, activeDownloadSpeedText,
                                 activeDownloadEtaText, activeDownloadPaused, queueRunning, queuedDownloadIds()));
-                        callback.onProgressUpdate(progress);
+                        callback.onProgressUpdate(completedProgress);
                     });
                 }
 
@@ -1388,34 +1380,55 @@ public class AutoSubTaskService extends Service {
             }
         }).start();
     }
+    
+    // פונקציית עזר להמשך התהליך לאחר יצירת הכתוביות ולצורך תמיכה בתרגום אוטומטי של Gemini
+    private void finishSubtitleGenerationAndSave(QueueItem queueItem) {
+        saveSubtitlesForQueueItemInternal(queueItem, currentBatchFormat(), null, selectedModelInfo,
+                SubtitleGenerator.SubtitleLayerMode.ORIGINAL,
+                new SubtitleGenerator.SubtitleSaveCallback() {
+                    @Override
+                    public void onSubtitlesSaved(String filePath) {
+                        handler.post(() -> {
+                            if (isRemovedActiveQueueItem(queueItem)) {
+                                finishRemovedActiveQueueItem(queueItem);
+                                return;
+                            }
+                            if (isCancelledActiveQueueItem(queueItem)) {
+                                return;
+                            }
+                            queueItem.setStatus(QueueItem.Status.COMPLETED);
+                            queueItem.setProgress(100);
+                            queueItem.setOutputPath(filePath);
+                            queueItem.setMessage("");
+                            String format = currentBatchFormat().toLowerCase(Locale.getDefault());
+                            if ("srt".equals(format)) queueItem.setSrtPath(filePath);
+                            if ("vtt".equals(format)) queueItem.setVttPath(filePath);
+                            queueStore.updateItem(queueItem);
+                            showSuccessNotificationIfEnabled(2001,
+                                    "Subtitles Generated", "Subtitles saved for " + queueItem.getDisplayName());
+                            publishQueueItems();
+                            processNextQueueItem();
+                        });
+                    }
 
-    public void batchSaveSubtitles(List<QueueItem> items, String format, File outputDir, VoskModelInfo modelInfo,
-                                   SubtitleGenerator.SubtitleSaveCallback callback) {
-        if (items == null || items.isEmpty()) {
-            callback.onError("No completed items with subtitles to export");
-            return;
-        }
-        beginForeground(AutoSubTaskState.TaskType.BATCH_SUBTITLE_SAVE,
-                "Batch Subtitle Export", "Starting...", -1);
-        batchRunning = true;
-        batchSaveNext(items, 0, format, outputDir, modelInfo, callback);
-    }
-
-    public void batchExportVideos(List<QueueItem> items, boolean burnSubtitles, String fontName, File outputDir,
-                                  VoskModelInfo modelInfo, BatchStyleResolver styleResolver,
-                                  SubtitleGenerator.VideoExportCallback callback) {
-        if (items == null || items.isEmpty()) {
-            callback.onError("No completed items with subtitles to export");
-            return;
-        }
-        beginForeground(AutoSubTaskState.TaskType.BATCH_VIDEO_EXPORT,
-                "Batch Video Export", "Starting...", -1);
-        batchRunning = true;
-        batchExportNext(items, 0, burnSubtitles, fontName, outputDir, modelInfo, styleResolver, callback);
-    }
-
-    public interface BatchStyleResolver {
-        SubtitleGenerator.ShortsSubtitleStyle styleFor(QueueItem item);
+                    @Override
+                    public void onError(String errorMessage) {
+                        handler.post(() -> {
+                            if (isRemovedActiveQueueItem(queueItem)) {
+                                finishRemovedActiveQueueItem(queueItem);
+                                return;
+                            }
+                            if (isCancelledActiveQueueItem(queueItem)) {
+                                return;
+                            }
+                            queueItem.setStatus(QueueItem.Status.FAILED);
+                            queueItem.setMessage(errorMessage);
+                            queueStore.updateItem(queueItem);
+                            publishQueueItems();
+                            processNextQueueItem();
+                        });
+                    }
+                });
     }
 
     private void processNextQueueItem() {
@@ -1452,7 +1465,6 @@ public class AutoSubTaskService extends Service {
         queueStore.updateItem(queueItem);
         publishQueueItems();
 
-        // The item's shorts flag already captures the word-by-word choice made when it was queued.
         boolean useWordByWord = queueItem.isShortsVideo();
         subtitleGenerator.setWordByWordMode(useWordByWord);
         subtitleGenerator.setMaxWordsPerSubtitle(settingsPrefs.getInt(
@@ -1468,11 +1480,17 @@ public class AutoSubTaskService extends Service {
                 KEY_WHISPER_VAD_AGGRESSIVENESS, SubtitleGenerator.VAD_AGGRESSIVENESS_NORMAL));
         subtitleGenerator.setWhisperLanguage(settingsPrefs.getString(KEY_WHISPER_LANGUAGE, "auto"));
         subtitleGenerator.setWhisperThreadCount(settingsPrefs.getInt(KEY_WHISPER_THREAD_COUNT, 0));
+        
+        // עצירת התרגום הפנימי אם Gemini נבחר
+        boolean translateEnabled = settingsPrefs.getBoolean(KEY_TRANSLATE_SUBTITLES, false);
+        String engine = settingsPrefs.getString("translation_engine", "default");
+        boolean useGeminiForAuto = translateEnabled && "gemini".equals(engine);
+
         subtitleGenerator.setTranslationSettings(
-                settingsPrefs.getBoolean(KEY_TRANSLATE_SUBTITLES, false),
+                translateEnabled && !useGeminiForAuto, 
                 settingsPrefs.getString(KEY_TRANSLATION_SOURCE_LANGUAGE, "auto"),
-                settingsPrefs.getString(KEY_TRANSLATION_TARGET_LANGUAGE,
-                        SubtitleGenerator.getDefaultTranslationTargetLanguage()));
+                settingsPrefs.getString(KEY_TRANSLATION_TARGET_LANGUAGE, SubtitleGenerator.getDefaultTranslationTargetLanguage()));
+                
         publishState(new AutoSubTaskState(AutoSubTaskState.TaskType.SUBTITLE_GENERATION,
                 "Generating Subtitles: " + queueItem.getDisplayName(), "Extracting audio...",
                 -1, queueItem.getId(), activeDownloadModelId, activeDownloadSpeedText,
@@ -1499,56 +1517,32 @@ public class AutoSubTaskService extends Service {
                     return;
                 }
                 queueItem.setSubtitles(entries);
-                queueItem.setTranslationSourceLanguage(subtitleGenerator.getResolvedTranslationSourceLanguage());
-                queueItem.setTranslationTargetLanguage(subtitleGenerator.getTranslationTargetLanguage());
-                queueItem.setTranslationStatus(SubtitleGenerator.hasTranslatedSubtitles(entries) ? "translated" : "");
                 queueItem.setPreviewText(getPreviewTextHelper(entries));
-                saveSubtitlesForQueueItemInternal(queueItem, currentBatchFormat(), null, selectedModelInfo,
-                        SubtitleGenerator.SubtitleLayerMode.ORIGINAL,
-                        new SubtitleGenerator.SubtitleSaveCallback() {
-                            @Override
-                            public void onSubtitlesSaved(String filePath) {
-                                handler.post(() -> {
-                                    if (isRemovedActiveQueueItem(queueItem)) {
-                                        finishRemovedActiveQueueItem(queueItem);
-                                        return;
-                                    }
-                                    if (isCancelledActiveQueueItem(queueItem)) {
-                                        return;
-                                    }
-                                    queueItem.setStatus(QueueItem.Status.COMPLETED);
-                                    queueItem.setProgress(100);
-                                    queueItem.setOutputPath(filePath);
-                                    queueItem.setMessage("");
-                                    String format = currentBatchFormat().toLowerCase(Locale.getDefault());
-                                    if ("srt".equals(format)) queueItem.setSrtPath(filePath);
-                                    if ("vtt".equals(format)) queueItem.setVttPath(filePath);
-                                    queueStore.updateItem(queueItem);
-                                    showSuccessNotificationIfEnabled(2001,
-                                            "Subtitles Generated", "Subtitles saved for " + queueItem.getDisplayName());
-                                    publishQueueItems();
-                                    processNextQueueItem();
-                                });
-                            }
-
-                            @Override
-                            public void onError(String errorMessage) {
-                                handler.post(() -> {
-                                    if (isRemovedActiveQueueItem(queueItem)) {
-                                        finishRemovedActiveQueueItem(queueItem);
-                                        return;
-                                    }
-                                    if (isCancelledActiveQueueItem(queueItem)) {
-                                        return;
-                                    }
-                                    queueItem.setStatus(QueueItem.Status.FAILED);
-                                    queueItem.setMessage(errorMessage);
-                                    queueStore.updateItem(queueItem);
-                                    publishQueueItems();
-                                    processNextQueueItem();
-                                });
-                            }
-                        });
+                
+                // הזרקת הלוגיקה של Gemini לתרגום האוטומטי
+                if (useGeminiForAuto && SubtitleGenerator.hasTranslatedSubtitles(entries) == false) {
+                    String srcLang = settingsPrefs.getString(KEY_TRANSLATION_SOURCE_LANGUAGE, "auto");
+                    String tgtLang = settingsPrefs.getString(KEY_TRANSLATION_TARGET_LANGUAGE, "en");
+                    translateQueueItemWithGemini(queueItem, srcLang, tgtLang, new SubtitleGenerator.TranslationCallback() {
+                        @Override
+                        public void onTranslated(List<SubtitleGenerator.SubtitleEntry> subtitleEntries, String resolvedSourceLanguage, String resolvedTargetLanguage) {
+                            finishSubtitleGenerationAndSave(queueItem);
+                        }
+                        @Override
+                        public void onError(String errorMessage) {
+                            finishSubtitleGenerationAndSave(queueItem);
+                        }
+                        @Override
+                        public void onProgressUpdate(int progress) {}
+                    });
+                } else {
+                    if (!useGeminiForAuto) {
+                        queueItem.setTranslationSourceLanguage(subtitleGenerator.getResolvedTranslationSourceLanguage());
+                        queueItem.setTranslationTargetLanguage(subtitleGenerator.getTranslationTargetLanguage());
+                        queueItem.setTranslationStatus(SubtitleGenerator.hasTranslatedSubtitles(entries) ? "translated" : "");
+                    }
+                    finishSubtitleGenerationAndSave(queueItem);
+                }
             }
 
             @Override
@@ -1606,130 +1600,6 @@ public class AutoSubTaskService extends Service {
                 });
             }
         });
-    }
-
-    private String subtitleProgressMessage(int progress) {
-        if (progress == SubtitleGenerator.PROGRESS_TRANSLATING) {
-            return "Translating subtitles...";
-        }
-        if (SubtitleGenerator.isScanningSpeechProgress(progress)) {
-            return "Detecting speech...";
-        }
-        if (progress == SubtitleGenerator.PROGRESS_DETECTING_LANGUAGE) {
-            return "Detecting language...";
-        }
-        if (progress == SubtitleGenerator.PROGRESS_PREPARING_AUDIO) {
-            return "Preparing audio...";
-        }
-        if (progress < 0) {
-            return "Extracting audio...";
-        }
-        return "Generating subtitles...";
-    }
-
-    private void saveSubtitlesForQueueItemInternal(QueueItem item, String format, File outputDir, VoskModelInfo modelInfo,
-                                                   SubtitleGenerator.SubtitleLayerMode layerMode,
-                                                   SubtitleGenerator.SubtitleSaveCallback callback) {
-        item.setStatus(QueueItem.Status.EXPORTING);
-        item.setProgress(0);
-        item.setMessage("Saving subtitles...");
-        queueStore.updateItem(item);
-        publishQueueItems();
-
-        subtitleGenerator.saveSubtitlesToFile(item.getSubtitles(), format, item.getVideoUri(), outputDir, layerMode, new SubtitleGenerator.SubtitleSaveCallback() {
-            @Override
-            public void onSubtitlesSaved(String filePath) {
-                handler.post(() -> {
-                    registerExport(filePath, ExportRecord.TYPE_SUBTITLE, item.getVideoUri(), item.getDisplayName(),
-                            format.toLowerCase(Locale.getDefault()) + "-" + layerMode.name().toLowerCase(Locale.US) + "-subtitles", format, modelInfo);
-                    String f = format.toLowerCase(Locale.getDefault());
-                    if ("srt".equals(f) && layerMode == SubtitleGenerator.SubtitleLayerMode.ORIGINAL) item.setSrtPath(filePath);
-                    if ("vtt".equals(f) && layerMode == SubtitleGenerator.SubtitleLayerMode.ORIGINAL) item.setVttPath(filePath);
-                    item.setStatus(QueueItem.Status.COMPLETED);
-                    item.setProgress(100);
-                    item.setOutputPath(filePath);
-                    item.setMessage("Subtitles saved: " + filePath);
-                    queueStore.updateItem(item);
-                    publishQueueItems();
-                    publishIdleStateIfNoWork();
-                    callback.onSubtitlesSaved(filePath);
-                });
-            }
-
-            @Override
-            public void onError(String errorMessage) {
-                handler.post(() -> {
-                    item.setStatus(QueueItem.Status.COMPLETED);
-                    item.setMessage("Failed to save: " + errorMessage);
-                    queueStore.updateItem(item);
-                    publishQueueItems();
-                    publishIdleStateIfNoWork();
-                    callback.onError(errorMessage);
-                });
-            }
-        });
-    }
-
-    private void exportVideoForQueueItemInternal(QueueItem item, boolean burnSubtitles, String fontName,
-                                                 SubtitleGenerator.ShortsSubtitleStyle shortsStyle,
-                                                 boolean forceMp4SoftSubtitles, File outputDir, VoskModelInfo modelInfo,
-                                                 SubtitleGenerator.SubtitleLayerMode layerMode,
-                                                 SubtitleGenerator.VideoExportCallback callback) {
-        item.setStatus(QueueItem.Status.EXPORTING);
-        item.setProgress(-1);
-        item.setMessage("Exporting video...");
-        queueStore.updateItem(item);
-        publishQueueItems();
-
-        subtitleGenerator.exportVideoWithSubtitles(item.getVideoUri(), item.getSubtitles(), burnSubtitles, fontName,
-                shortsStyle, forceMp4SoftSubtitles, outputDir, layerMode, new SubtitleGenerator.VideoExportCallback() {
-                    @Override
-                    public void onVideoExported(String filePath) {
-                        handler.post(() -> {
-                            registerExport(filePath, ExportRecord.TYPE_VIDEO, item.getVideoUri(), item.getDisplayName(),
-                                    (burnSubtitles ? "hard-" : "soft-") + layerMode.name().toLowerCase(Locale.US) + "-subtitles",
-                                    filePath.toLowerCase(Locale.getDefault()).endsWith(".mkv") ? "mkv" : "mp4", modelInfo);
-                            if (burnSubtitles) item.setHardVideoPath(filePath);
-                            else item.setSoftVideoPath(filePath);
-                            item.setStatus(QueueItem.Status.COMPLETED);
-                            item.setProgress(100);
-                            item.setMessage("Video exported: " + filePath);
-                            queueStore.updateItem(item);
-                            publishQueueItems();
-                            showSuccessNotificationIfEnabled(3001,
-                                    "Video Export Complete", "Video exported successfully: " + item.getDisplayName());
-                            publishIdleStateIfNoWork();
-                            callback.onVideoExported(filePath);
-                        });
-                    }
-
-                    @Override
-                    public void onError(String errorMessage) {
-                        handler.post(() -> {
-                            item.setStatus(QueueItem.Status.COMPLETED);
-                            item.setMessage("Failed to export: " + errorMessage);
-                            queueStore.updateItem(item);
-                            publishQueueItems();
-                            publishIdleStateIfNoWork();
-                            callback.onError(errorMessage);
-                        });
-                    }
-
-                    @Override
-                    public void onProgressUpdate(int progress) {
-                        handler.post(() -> {
-                            item.setProgress(progress);
-                            item.setMessage(progress < 0 ? "Exporting video..." : "Exporting video... " + progress + "%");
-                            queueStore.updateItem(item);
-                            publishQueueItems();
-                            publishState(new AutoSubTaskState(AutoSubTaskState.TaskType.VIDEO_EXPORT,
-                                    "Exporting Video: " + item.getDisplayName(), item.getMessage(),
-                                    progress, item.getId(), activeDownloadModelId, activeDownloadSpeedText,
-                                    activeDownloadEtaText, activeDownloadPaused, queueRunning, queuedDownloadIds()));
-                            callback.onProgressUpdate(progress);
-                        });
-                    }
-                });
     }
 
     private void batchSaveNext(List<QueueItem> items, int index, String format, File outputDir,
